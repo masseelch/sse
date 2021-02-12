@@ -32,18 +32,19 @@ type ResponseValidator func(c *Client, resp *http.Response) error
 
 // Client handles an incoming server stream
 type Client struct {
-	URL               string
-	Connection        *http.Client
-	Retry             time.Time
-	subscribed        map[chan *Event]chan bool
-	Headers           map[string]string
-	EncodingBase64    bool
-	EventID           string
-	disconnectcb      ConnCallback
-	ResponseValidator ResponseValidator
-	ReconnectStrategy backoff.BackOff
-	ReconnectNotify   backoff.Notify
-	mu                sync.Mutex
+	URL                       string
+	Connection                *http.Client
+	Retry                     time.Time
+	subscribed                map[chan *Event]chan bool
+	Headers                   map[string]string
+	EncodingBase64            bool
+	EventID                   string
+	disconnectcb              ConnCallback
+	ResponseValidator         ResponseValidator
+	ReconnectStrategy         backoff.BackOff
+	ReconnectNotify           backoff.Notify
+	ReconnectOnConnectionLoss bool
+	mu                        sync.Mutex
 }
 
 // NewClient creates a new client
@@ -53,6 +54,7 @@ func NewClient(url string) *Client {
 		Connection: &http.Client{},
 		Headers:    make(map[string]string),
 		subscribed: make(map[chan *Event]chan bool),
+		ReconnectOnConnectionLoss: true,
 	}
 }
 
@@ -194,8 +196,10 @@ func (c *Client) readLoop(reader *EventStreamReader, outCh chan *Event, erChan c
 		event, err := reader.ReadEvent()
 		if err != nil {
 			if err == io.EOF {
-				erChan <- nil
-				return
+				if !c.ReconnectOnConnectionLoss{
+					erChan <- nil
+					return
+				}
 			}
 			// run user specified disconnect function
 			if c.disconnectcb != nil {
